@@ -17,15 +17,40 @@ from .dump import dump  # noqa: F401
 
 
 class SwitchModel(Exception):
+    """Exception raised to signal switching to a different LLM model."""
     def __init__(self, model):
         self.model = model
 
 
 class Commands:
+    """
+    Interactive command processor for the aider chat interface.
+
+    The Commands class implements 35+ slash commands that control various
+    aspects of the coding session including:
+    - Model switching (/model, /models)
+    - File management (/add, /drop, /ls)
+    - Git operations (/commit, /diff, /undo)
+    - Code quality (/lint, /test)
+    - External content (/web for scraping URLs)
+    - Session management (/clear, /tokens, /exit)
+    - Configuration (/settings)
+
+    All methods starting with 'cmd_' automatically become available as
+    commands with the format /commandname.
+    """
     voice = None
     scraper = None
 
     def __init__(self, io, coder, voice_language=None):
+        """
+        Initialize the command processor.
+
+        Args:
+            io: InputOutput instance for user interaction
+            coder: The Coder instance this commands object controls
+            voice_language: Optional language code for voice input ("auto" disables)
+        """
         self.io = io
         self.coder = coder
 
@@ -119,6 +144,21 @@ class Commands:
         return matching_commands, first_word, rest_inp
 
     def run(self, inp):
+        """
+        Execute a command from user input.
+
+        Handles command parsing, matching, and execution. Supports:
+        - Shell commands starting with '!'
+        - Slash commands like /add, /commit, etc.
+        - Partial command matching (e.g., /mod matches /model)
+        - Ambiguous command detection
+
+        Args:
+            inp: The command string including prefix (/, !)
+
+        Returns:
+            The result of the executed command, or None
+        """
         if inp.startswith("!"):
             return self.do_run("run", inp[1:])
             return
@@ -154,7 +194,22 @@ class Commands:
         self.coder.repo.commit(message=commit_message)
 
     def cmd_lint(self, args="", fnames=None):
-        "Lint and fix provided files or in-chat files if none provided"
+        """
+        Lint and automatically fix linting errors in specified files.
+
+        This command:
+        - Runs language-specific linters on files
+        - For files with errors, creates a temporary Coder to fix them
+        - Commits changes before and after fixing
+        - Uses the configured linters from lint_cmds
+
+        Args:
+            args: Command arguments (currently unused)
+            fnames: Optional list of files to lint, defaults to in-chat files
+
+        Returns:
+            None
+        """
 
         if not self.coder.repo:
             self.io.tool_error("No git repository found.")
@@ -207,7 +262,20 @@ class Commands:
         self.coder.cur_messages = []
 
     def cmd_tokens(self, args):
-        "Report on the number of tokens used by the current chat context"
+        """
+        Report detailed token usage breakdown for the current chat context.
+
+        Analyzes and displays:
+        - System messages token count
+        - Chat history token count
+        - Repository map token count
+        - Individual file token counts
+        - Total usage vs context window limit
+        - Estimated costs based on model pricing
+
+        Args:
+            args: Command arguments (currently unused)
+        """
 
         res = []
 

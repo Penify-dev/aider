@@ -33,18 +33,45 @@ from ..dump import dump  # noqa: F401
 
 
 class MissingAPIKeyError(ValueError):
+    """Raised when an API key is missing or invalid for LLM communication."""
     pass
 
 
 class ExhaustedContextWindow(Exception):
+    """Raised when the chat session exceeds the model's context window size."""
     pass
 
 
 def wrap_fence(name):
+    """
+    Create opening and closing XML-style fence tags for code blocks.
+
+    Args:
+        name: The tag name to wrap
+
+    Returns:
+        Tuple of (opening_tag, closing_tag)
+    """
     return f"<{name}>", f"</{name}>"
 
 
 class Coder:
+    """
+    Core orchestrator for AI-powered code editing with LLM interactions.
+
+    The Coder class manages all aspects of an AI coding session including:
+    - LLM communication and message formatting
+    - File tracking and content management
+    - Git repository operations and auto-commits
+    - Code editing via various edit formats (diff, whole-file, etc.)
+    - Linting and testing integration
+    - Chat history summarization
+    - Repository mapping for context
+
+    This is the base class for format-specific coders (EditBlockCoder,
+    WholeFileCoder, etc.) that implement different ways the LLM can
+    specify code changes.
+    """
     abs_fnames = None
     repo = None
     last_aider_commit_hash = None
@@ -76,6 +103,22 @@ class Coder:
         from_coder=None,
         **kwargs,
     ):
+        """
+        Factory method to create the appropriate Coder subclass based on edit format.
+
+        Args:
+            main_model: The Model instance to use for LLM interactions
+            edit_format: The editing format ("diff", "diff-fenced", "whole", "udiff")
+            io: InputOutput instance for user interaction
+            from_coder: Optional existing Coder to clone context from
+            **kwargs: Additional arguments passed to the Coder constructor
+
+        Returns:
+            A Coder instance of the appropriate subclass for the edit format
+
+        Raises:
+            ValueError: If an unknown edit format is specified
+        """
         from . import (
             EditBlockCoder,
             EditBlockFencedCoder,
@@ -219,6 +262,36 @@ class Coder:
         lint_cmds=None,
         test_cmd=None,
     ):
+        """
+        Initialize a Coder instance for AI-powered code editing.
+
+        Args:
+            main_model: Model instance defining the LLM to use
+            io: InputOutput instance for user interaction
+            fnames: List of initial file paths to add to the chat
+            git_dname: Directory to use as git repository root
+            pretty: Enable rich terminal formatting
+            show_diffs: Show git diffs after commits
+            auto_commits: Automatically commit changes made by the LLM
+            dirty_commits: Allow commits even with uncommitted local changes
+            dry_run: Preview edits without actually applying them
+            map_tokens: Max tokens to use for repository map context
+            verbose: Enable detailed logging
+            assistant_output_color: Color for AI responses in terminal
+            code_theme: Syntax highlighting theme for code blocks
+            stream: Stream LLM responses token-by-token
+            use_git: Enable git integration
+            voice_language: Language code for voice input
+            aider_ignore_file: Path to .aiderignore file
+            cur_messages: Current chat messages (for restoration)
+            done_messages: Completed chat history (for restoration)
+            max_chat_history_tokens: Max tokens before summarizing history
+            restore_chat_history: Load previous chat from history file
+            auto_lint: Automatically lint edited files
+            auto_test: Automatically run tests after edits
+            lint_cmds: Dict of language->linter command mappings
+            test_cmd: Command to run for testing
+        """
         if not fnames:
             fnames = []
 
@@ -469,6 +542,16 @@ class Coder:
         return words
 
     def get_repo_map(self):
+        """
+        Generate a repository map showing code structure and definitions.
+
+        The repo map uses tree-sitter to parse code and PageRank to identify
+        important symbols. It provides context about the codebase structure
+        without including full file contents.
+
+        Returns:
+            String containing the formatted repository map, or None if disabled
+        """
         if not self.repo_map:
             return
 
@@ -573,6 +656,22 @@ class Coder:
         self.edit_outcome = None
 
     def run(self, with_message=None):
+        """
+        Main execution loop for interactive AI coding sessions.
+
+        This method handles the complete chat loop including:
+        - Getting user input (or using provided message)
+        - Sending messages to the LLM
+        - Applying code edits
+        - Running linting and tests
+        - Handling reflections (retry loops)
+
+        Args:
+            with_message: Optional message to run immediately instead of prompting
+
+        Returns:
+            The LLM's response content if with_message provided, None otherwise
+        """
         while True:
             self.init_before_message()
 
@@ -696,6 +795,21 @@ class Coder:
         return prompt
 
     def format_messages(self):
+        """
+        Format all messages for sending to the LLM.
+
+        Constructs the complete message array including:
+        - System prompt with instructions and edit format
+        - Example conversations (if applicable)
+        - Summarized chat history
+        - Repository map context
+        - Files content
+        - Current conversation messages
+        - System reminder
+
+        Returns:
+            List of formatted message dicts ready for the LLM API
+        """
         self.choose_fence()
         main_sys = self.fmt_system_prompt(self.gpt_prompts.main_system)
 
@@ -1247,6 +1361,18 @@ class Coder:
         return set(edit[0] for edit in edits)
 
     def apply_updates(self):
+        """
+        Apply code edits from the LLM's response to actual files.
+
+        This method:
+        - Extracts edits from the LLM response
+        - Validates permissions to edit files
+        - Applies the changes to disk
+        - Handles errors and malformed responses
+
+        Returns:
+            Set of relative file paths that were edited, or None if errors occurred
+        """
         try:
             edited = self.update_files()
         except ValueError as err:
@@ -1322,6 +1448,15 @@ class Coder:
         return context
 
     def auto_commit(self, edited):
+        """
+        Automatically commit edited files to git with an AI-generated message.
+
+        Args:
+            edited: Set of relative file paths that were edited
+
+        Returns:
+            Formatted message about the commit, or message about no changes
+        """
         context = self.get_context_from_history(self.cur_messages)
         res = self.repo.commit(fnames=edited, context=context, prefix="aider: ")
         if res:

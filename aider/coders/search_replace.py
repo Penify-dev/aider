@@ -1,5 +1,30 @@
 #!/usr/bin/env python
 
+"""
+Search and replace code editing implementation for aider.
+
+This module implements the "search and replace" edit format where the LLM
+provides old/new code block pairs to edit files. Key features:
+
+- Uses diff-match-patch algorithm for fuzzy matching
+- Handles indentation variations with RelativeIndenter
+- Remaps offsets when LLM provides partial/excerpted code
+- Applies multiple patches in sequence
+- Validates all patches applied successfully
+
+The search-replace format is more reliable than whole-file editing for:
+- Large files where only small changes are needed
+- Files with complex formatting or generated code
+- Situations where indentation might vary
+
+Main workflow:
+1. LLM provides search block (old code) and replace block (new code)
+2. Convert to relative indentation to handle indent differences
+3. Create patches using diff-match-patch
+4. Remap patch offsets from excerpt to full original file
+5. Apply patches and validate all succeeded
+"""
+
 import sys
 from pathlib import Path
 
@@ -187,6 +212,24 @@ class RelativeIndenter:
 
 
 def map_patches(texts, patches, debug):
+    """
+    Remap patch offsets from search text to original text coordinates.
+
+    When the LLM provides a code excerpt (search_text) that doesn't match
+    the full original file, this function adjusts all patch offsets to
+    point to the correct locations in the original_text.
+
+    It uses diff-match-patch to compute a mapping from search_text offsets
+    to original_text offsets, then updates all patches accordingly.
+
+    Args:
+        texts: Tuple of (search_text, replace_text, original_text)
+        patches: List of patches with offsets relative to search_text
+        debug: Enable debug output and HTML diff visualization
+
+    Returns:
+        List of patches with offsets remapped to original_text coordinates
+    """
     search_text, replace_text, original_text = texts
 
     dmp = diff_match_patch()
@@ -247,6 +290,19 @@ sys.exit()
 
 
 def relative_indent(texts):
+    """
+    Convert texts to relative indentation format.
+
+    This helper function creates a RelativeIndenter and applies it to
+    all provided texts, making code blocks easier to match despite
+    differences in absolute indentation levels.
+
+    Args:
+        texts: List of text strings to convert
+
+    Returns:
+        Tuple of (RelativeIndenter instance, list of converted texts)
+    """
     ri = RelativeIndenter(texts)
     texts = list(map(ri.make_relative, texts))
 
@@ -268,6 +324,27 @@ def line_unpad(text):
 
 
 def dmp_apply(texts, remap=True):
+    """
+    Apply search/replace transformation using diff-match-patch algorithm.
+
+    This is the core function for applying LLM-provided code edits. It:
+    1. Computes diffs between search_text and replace_text
+    2. Creates patches from those diffs
+    3. Optionally remaps patch offsets to handle excerpts
+    4. Applies patches to original_text with fuzzy matching
+    5. Validates all patches applied successfully
+
+    The remap parameter controls whether to remap offsets (True when LLM
+    provided an excerpt) or apply directly (False when LLM provided the
+    exact original content).
+
+    Args:
+        texts: Tuple of (search_text, replace_text, original_text)
+        remap: If True, remap patch offsets from excerpt to full file
+
+    Returns:
+        Modified text if all patches succeeded, None otherwise
+    """
     debug = False
     # debug = True
 

@@ -25,6 +25,25 @@ Tag = namedtuple("Tag", "rel_fname fname line name kind".split())
 
 
 class RepoMap:
+    """
+    Intelligent repository code map generator using tree-sitter and PageRank.
+
+    RepoMap provides AI models with context about a codebase by:
+    - Parsing code with tree-sitter to extract definitions and references
+    - Building a graph connecting files through shared symbols
+    - Using PageRank algorithm to identify important code sections
+    - Generating a concise map showing relevant code structure
+    - Caching parsed tags for performance
+
+    The map includes:
+    - Function and class definitions from relevant files
+    - Connections between files through imports and references
+    - Prioritization based on what's mentioned in the chat
+    - Token budget management to fit within LLM context limits
+
+    This allows the LLM to understand the codebase structure without
+    including full file contents, enabling better code suggestions.
+    """
     CACHE_VERSION = 3
     TAGS_CACHE_DIR = f".aider.tags.cache.v{CACHE_VERSION}"
 
@@ -42,6 +61,18 @@ class RepoMap:
         verbose=False,
         max_context_window=None,
     ):
+        """
+        Initialize the repository map generator.
+
+        Args:
+            map_tokens: Maximum tokens to allocate for the repo map
+            root: Root directory of the repository
+            main_model: Model instance for token counting
+            io: InputOutput instance for reading files and showing output
+            repo_content_prefix: Prefix text to add before the map
+            verbose: Enable detailed logging
+            max_context_window: Maximum context window size of the model
+        """
         self.io = io
         self.verbose = verbose
 
@@ -58,6 +89,25 @@ class RepoMap:
         self.repo_content_prefix = repo_content_prefix
 
     def get_repo_map(self, chat_files, other_files, mentioned_fnames=None, mentioned_idents=None):
+        """
+        Generate a repository map showing relevant code structure.
+
+        Creates an intelligent code map by:
+        1. Parsing files to extract code definitions and references
+        2. Building a graph of symbol relationships across files
+        3. Using PageRank to rank files by importance
+        4. Prioritizing files/symbols mentioned in chat
+        5. Formatting output to fit within token budget
+
+        Args:
+            chat_files: Set of files currently in the chat context
+            other_files: Set of other repository files to consider
+            mentioned_fnames: Optional set of file names mentioned in recent messages
+            mentioned_idents: Optional set of identifiers mentioned in recent messages
+
+        Returns:
+            Formatted string containing the repo map, or None if disabled/empty
+        """
         if self.max_map_tokens <= 0:
             return
         if not other_files:
@@ -229,6 +279,27 @@ class RepoMap:
             )
 
     def get_ranked_tags(self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents):
+        """
+        Extract and rank code tags using PageRank algorithm.
+
+        This method:
+        1. Extracts definitions and references from all files using tree-sitter
+        2. Builds a directed graph where edges represent symbol usage between files
+        3. Applies personalized PageRank to prioritize:
+           - Files currently in the chat
+           - Files mentioned in recent messages
+           - Identifiers mentioned in recent messages
+        4. Returns ranked tags sorted by importance
+
+        Args:
+            chat_fnames: Files currently in chat (higher priority)
+            other_fnames: Other repository files to analyze
+            mentioned_fnames: File names mentioned in recent chat messages
+            mentioned_idents: Identifiers mentioned in recent chat messages
+
+        Returns:
+            List of (rank_score, tag) tuples sorted by importance
+        """
         defines = defaultdict(set)
         references = defaultdict(list)
         definitions = defaultdict(set)

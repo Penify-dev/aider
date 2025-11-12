@@ -1,3 +1,23 @@
+"""
+Command-line argument parsing for aider.
+
+This module defines all CLI arguments, configuration file handling,
+and environment variable support for aider. It uses configargparse
+to support multiple configuration sources with the following precedence:
+1. Command-line arguments (highest priority)
+2. Environment variables (prefixed with AIDER_)
+3. Configuration files (.aider.conf.yml)
+4. Default values (lowest priority)
+
+The parser defines 100+ options organized into groups:
+- Main: Core settings like model selection and API keys
+- Model Settings: LLM configuration and edit formats
+- History: Chat history and context management
+- Git Settings: Repository and commit behavior
+- Output Settings: Display and verbosity options
+- Advanced Options: Expert settings and experimental features
+"""
+
 import argparse
 import os
 
@@ -7,6 +27,23 @@ from aider import __version__, models
 
 
 def get_parser(default_config_files, git_root):
+    """
+    Create and configure the argument parser for aider.
+
+    This function builds the complete argument parser with all options
+    organized into logical groups. It supports:
+    - YAML configuration files
+    - Environment variables (AIDER_* prefix)
+    - Command-line arguments
+    - Default values
+
+    Args:
+        default_config_files: List of config file paths to check for settings
+        git_root: Git repository root directory (for relative path resolution)
+
+    Returns:
+        Configured ArgumentParser instance ready to parse arguments
+    """
     parser = configargparse.ArgumentParser(
         description="aider is GPT powered coding in your terminal",
         add_config_file_help=True,
