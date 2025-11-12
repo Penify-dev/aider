@@ -43,8 +43,13 @@ class Commands:
         raise SwitchModel(model)
 
     def completions_model(self, partial):
-        models = litellm.model_cost.keys()
-        for model in models:
+        try:
+            model_list = litellm.model_cost.keys()
+        except (ImportError, AttributeError):
+            # litellm not available, return empty
+            return
+        
+        for model in model_list:
             if partial.lower() in model.lower():
                 yield Completion(model, start_position=-len(partial))
 

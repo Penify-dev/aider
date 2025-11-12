@@ -352,7 +352,11 @@ class Model:
         return [self.weak_model]
 
     def tokenizer(self, text):
-        return litellm.encode(model=self.name, text=text)
+        try:
+            return litellm.encode(model=self.name, text=text)
+        except (ImportError, AttributeError):
+            # litellm not available, use fallback
+            return None
 
     def token_count(self, messages):
         if not self.tokenizer:
@@ -409,7 +413,23 @@ class Model:
         # https://github.com/BerriAI/litellm/issues/3190
 
         model = self.name
-        res = litellm.validate_environment(model)
+        try:
+            res = litellm.validate_environment(model)
+        except ImportError as e:
+            # litellm is not properly installed or has missing dependencies
+            return dict(
+                keys_in_environment=False,
+                missing_keys=["LITELLM_NOT_INSTALLED"],
+                error=str(e)
+            )
+        except Exception as e:
+            # Other errors during validation
+            return dict(
+                keys_in_environment=False,
+                missing_keys=[],
+                error=str(e)
+            )
+        
         if res["keys_in_environment"]:
             return res
         if res["missing_keys"]:
@@ -478,7 +498,13 @@ def fuzzy_match_models(name):
     name = name.lower()
 
     chat_models = []
-    for model, attrs in litellm.model_cost.items():
+    try:
+        model_cost = litellm.model_cost
+    except (ImportError, AttributeError):
+        # litellm not available, return empty list
+        return []
+    
+    for model, attrs in model_cost.items():
         model = model.lower()
         if attrs.get("mode") != "chat":
             continue
