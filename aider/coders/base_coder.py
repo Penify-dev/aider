@@ -772,6 +772,83 @@ class Coder:
 
         return messages
 
+    def _get_helpful_provider_error_message(self, err):
+        """
+        Generate a helpful error message for LLM provider configuration issues.
+        """
+        err_str = str(err)
+        model_name = self.main_model.name if self.main_model else "unknown"
+        
+        # Check if this is a "LLM Provider NOT provided" error
+        if "LLM Provider NOT provided" not in err_str and "LLM Provider not provided" not in err_str:
+            return None
+        
+        # Build helpful error message
+        msg_parts = [
+            f"BadRequestError: {err}",
+            "",
+            "This error occurs when the model name doesn't include a valid provider prefix,",
+            "or when required environment variables are not set correctly.",
+            "",
+        ]
+        
+        # Provide specific guidance based on model name patterns
+        model_lower = model_name.lower()
+        
+        if model_lower.startswith("local/"):
+            msg_parts.extend([
+                f"You're using model: {model_name}",
+                "",
+                "The 'local/' prefix is not a standard LiteLLM provider.",
+                "For local models via Ollama, you should:",
+                "",
+                "1. Use the 'ollama/' or 'ollama_chat/' prefix instead:",
+                f"   aider --model ollama/{model_name.split('/', 1)[1]}",
+                "",
+                "2. Set the OLLAMA_API_BASE environment variable (not OPENAI_API_BASE):",
+                "   export OLLAMA_API_BASE=http://127.0.0.1:11434",
+                "",
+                "3. Make sure the URL does NOT include '/v1' or a trailing '/'",
+                "",
+                "Example:",
+                f"   export OLLAMA_API_BASE=http://127.0.0.1:11434",
+                f"   aider --model ollama/{model_name.split('/', 1)[1]}",
+                "",
+            ])
+        elif "/" not in model_name or model_name.count("/") > 1:
+            msg_parts.extend([
+                f"You're using model: {model_name}",
+                "",
+                "Model names should include a provider prefix in the format: provider/model-name",
+                "",
+                "Common examples:",
+                "  - OpenAI: openai/gpt-4o or just gpt-4o",
+                "  - Anthropic: anthropic/claude-3-opus-20240229 or just claude-3-opus-20240229",
+                "  - Ollama: ollama/llama3:70b or ollama_chat/llama3:70b",
+                "  - Groq: groq/llama3-70b-8192",
+                "  - OpenRouter: openrouter/meta-llama/llama-3-70b-instruct",
+                "",
+            ])
+        else:
+            msg_parts.extend([
+                f"You're using model: {model_name}",
+                "",
+                "Please check that:",
+                "1. The provider prefix is correct (e.g., 'ollama/', 'openai/', 'anthropic/')",
+                "2. Required environment variables are set for this provider",
+                "3. The API base URL is correct (if using a custom endpoint)",
+                "",
+            ])
+        
+        msg_parts.extend([
+            "For more information:",
+            "  - Ollama setup: https://aider.chat/docs/llms.html#ollama",
+            "  - All LLM providers: https://aider.chat/docs/llms.html",
+            "  - LiteLLM providers: https://docs.litellm.ai/docs/providers",
+        ])
+        
+        return "\n".join(msg_parts)
+
     def send_new_user_message(self, inp):
         self.aider_edited_files = None
 
@@ -793,7 +870,12 @@ class Coder:
         except ExhaustedContextWindow:
             exhausted = True
         except litellm.exceptions.BadRequestError as err:
-            self.io.tool_error(f"BadRequestError: {err}")
+            # Try to provide a more helpful error message for provider configuration issues
+            helpful_msg = self._get_helpful_provider_error_message(err)
+            if helpful_msg:
+                self.io.tool_error(helpful_msg)
+            else:
+                self.io.tool_error(f"BadRequestError: {err}")
             return
         except openai.BadRequestError as err:
             if "maximum context length" in str(err):
