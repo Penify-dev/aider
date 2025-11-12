@@ -1,3 +1,17 @@
+"""
+Main entry point for aider - AI pair programming in your terminal.
+
+This module handles:
+- Command-line argument parsing and configuration loading
+- Git repository initialization and setup
+- Model initialization and validation
+- Coder instance creation and management
+- Interactive chat session orchestration
+
+The main() function is the primary entry point that coordinates all these components
+to provide an interactive AI-assisted coding experience.
+"""
+
 import configparser
 import os
 import re
@@ -21,7 +35,20 @@ from .dump import dump  # noqa: F401
 
 
 def get_git_root():
-    """Try and guess the git repo, since the conf.yml can be at the repo root"""
+    """
+    Attempt to locate the git repository root directory.
+    
+    Searches parent directories to find a git repository, which is useful for
+    locating configuration files (like .aider.conf.yml) at the repo root.
+    
+    Returns:
+        str: Path to the git repository working tree directory, or None if not found.
+        
+    Example:
+        >>> root = get_git_root()
+        >>> if root:
+        ...     print(f"Found git repo at: {root}")
+    """
     try:
         repo = git.Repo(search_parent_directories=True)
         return repo.working_tree_dir
@@ -30,7 +57,22 @@ def get_git_root():
 
 
 def guessed_wrong_repo(io, git_root, fnames, git_dname):
-    """After we parse the args, we can determine the real repo. Did we guess wrong?"""
+    """
+    Verify if the initially guessed git repository is correct.
+    
+    After parsing command-line arguments, we can determine the actual repository
+    being used. This function checks if our initial guess was wrong and returns
+    the correct repository path if different.
+    
+    Args:
+        io: InputOutput instance for user interaction.
+        git_root (str): Initially guessed git repository root.
+        fnames (list): List of file names provided by the user.
+        git_dname (str): Git directory name from arguments.
+        
+    Returns:
+        str: Correct repository root path if different from guess, None otherwise.
+    """
 
     try:
         check_repo = Path(GitRepo(io, fnames, git_dname).root).resolve()
@@ -49,6 +91,23 @@ def guessed_wrong_repo(io, git_root, fnames, git_dname):
 
 
 def setup_git(git_root, io):
+    """
+    Initialize and configure a git repository for aider usage.
+    
+    Sets up a git repository, creating one if needed, and ensures proper
+    git configuration (user.name and user.email) is present.
+    
+    Args:
+        git_root (str): Path to git repository root, or None to create new repo.
+        io: InputOutput instance for user interaction and prompts.
+        
+    Returns:
+        str: Path to the git repository working tree directory, or None if setup failed.
+        
+    Note:
+        If user.name or user.email are not configured, placeholder values are set
+        and the user is prompted to update them with proper git config commands.
+    """
     repo = None
     if git_root:
         repo = git.Repo(git_root)
@@ -88,6 +147,23 @@ def setup_git(git_root, io):
 
 
 def check_gitignore(git_root, io, ask=True):
+    """
+    Ensure .aider* pattern is added to .gitignore file.
+    
+    Checks if .aider files are already ignored, and if not, prompts the user
+    to add the pattern to .gitignore to prevent aider metadata from being committed.
+    
+    Args:
+        git_root (str): Path to git repository root.
+        io: InputOutput instance for user interaction.
+        ask (bool): Whether to ask user for confirmation before adding pattern.
+        
+    Returns:
+        None
+        
+    Side Effects:
+        May modify or create .gitignore file in the repository root.
+    """
     if not git_root:
         return
 
@@ -122,6 +198,19 @@ def check_gitignore(git_root, io, ask=True):
 
 
 def format_settings(parser, args):
+    """
+    Format configuration settings for display to the user.
+    
+    Creates a human-readable string showing all parser and argument settings,
+    with sensitive information (API keys) scrubbed for security.
+    
+    Args:
+        parser: ArgumentParser instance with configuration.
+        args: Parsed command-line arguments namespace.
+        
+    Returns:
+        str: Formatted settings string with sensitive data redacted.
+    """
     show = scrub_sensitive_info(args, parser.format_values())
     show += "\n"
     show += "Option settings:\n"
@@ -133,6 +222,19 @@ def format_settings(parser, args):
 
 
 def scrub_sensitive_info(args, text):
+    """
+    Remove sensitive information from text for safe display.
+    
+    Replaces API keys and other sensitive data with placeholder strings
+    to prevent accidental exposure in logs or output.
+    
+    Args:
+        args: Parsed arguments containing API keys to scrub.
+        text (str): Text potentially containing sensitive information.
+        
+    Returns:
+        str: Text with sensitive information replaced by "***".
+    """
     # Replace sensitive information with placeholder
     if text and args.openai_api_key:
         text = text.replace(args.openai_api_key, "***")
@@ -142,6 +244,19 @@ def scrub_sensitive_info(args, text):
 
 
 def launch_gui(args):
+    """
+    Launch the Streamlit-based GUI interface for aider.
+    
+    Starts a Streamlit web server with appropriate configuration flags
+    for the aider GUI, including development mode settings if running
+    a development version.
+    
+    Args:
+        args (list): Command-line arguments to pass to the GUI.
+        
+    Returns:
+        None (function runs until user exits with CTRL-C).
+    """
     from aider import gui
 
     print()
@@ -179,6 +294,25 @@ def launch_gui(args):
 
 
 def parse_lint_cmds(lint_cmds, io):
+    """
+    Parse and validate lint command specifications.
+    
+    Processes lint commands which can be language-specific (e.g., "python: flake8")
+    or generic. Validates format and returns a dictionary mapping languages to commands.
+    
+    Args:
+        lint_cmds (list): List of lint command strings to parse.
+        io: InputOutput instance for error reporting.
+        
+    Returns:
+        dict: Mapping of language (or None for generic) to lint command string.
+              Returns None if parsing errors occurred.
+              
+    Example:
+        >>> cmds = parse_lint_cmds(["python: flake8 --select=E9"], io)
+        >>> print(cmds)
+        {'python': 'flake8 --select=E9'}
+    """
     err = False
     res = dict()
     for lint_cmd in lint_cmds:
@@ -206,6 +340,37 @@ def parse_lint_cmds(lint_cmds, io):
 
 
 def main(argv=None, input=None, output=None, force_git_root=None, return_coder=False):
+    """
+    Main entry point for the aider application.
+    
+    Orchestrates the entire aider workflow including:
+    - Configuration file discovery and argument parsing
+    - Git repository setup and validation
+    - Model initialization and validation
+    - Coder instance creation with all specified options
+    - Interactive chat session or one-shot command execution
+    
+    Args:
+        argv (list, optional): Command-line arguments. Defaults to sys.argv[1:].
+        input: Input stream for testing. Defaults to stdin.
+        output: Output stream for testing. Defaults to stdout.
+        force_git_root (str, optional): Force a specific git root directory.
+        return_coder (bool): If True, return Coder instance instead of running chat.
+        
+    Returns:
+        int: Exit status code (0 for success, 1 for error).
+        Coder: If return_coder=True, returns configured Coder instance.
+        
+    Example:
+        >>> # Run interactively
+        >>> main()
+        
+        >>> # Run with specific files
+        >>> main(argv=['file1.py', 'file2.py'])
+        
+        >>> # Get coder instance for testing
+        >>> coder = main(return_coder=True)
+    """
     if argv is None:
         argv = sys.argv[1:]
 

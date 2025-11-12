@@ -1,3 +1,18 @@
+"""
+Model configuration and management for aider.
+
+This module provides:
+- ModelSettings dataclass for defining LLM-specific configurations
+- Model class for managing LLM instances and their properties
+- Comprehensive settings for various OpenAI, Anthropic, and other LLM models
+- Token counting and cost estimation utilities
+- Model validation and sanity checking
+
+The module maintains a registry of known models with their optimal edit formats,
+token limits, and behavioral settings to ensure aider works effectively with
+different LLMs.
+"""
+
 import difflib
 import json
 import math
@@ -16,6 +31,31 @@ DEFAULT_MODEL_NAME = "gpt-4o"
 
 @dataclass
 class ModelSettings:
+    """
+    Configuration settings for a specific LLM model.
+    
+    Defines how aider should interact with a particular model, including
+    the optimal edit format, token limits, and behavioral flags.
+    
+    Attributes:
+        name (str): Model identifier (e.g., "gpt-4o", "claude-3-opus").
+        edit_format (str): Preferred edit format ("diff", "udiff", "whole", etc.).
+        weak_model_name (str, optional): Name of a cheaper model for simple tasks.
+        use_repo_map (bool): Whether to send repository map for context.
+        send_undo_reply (bool): Whether to send undo confirmation messages.
+        accepts_images (bool): Whether the model supports image inputs.
+        lazy (bool): Whether to use lazy loading for prompts.
+        reminder_as_sys_msg (bool): Send reminders as system messages.
+        examples_as_sys_msg (bool): Send examples as system messages.
+        
+    Example:
+        >>> settings = ModelSettings(
+        ...     name="gpt-4o",
+        ...     edit_format="diff",
+        ...     use_repo_map=True,
+        ...     accepts_images=True
+        ... )
+    """
     name: str
     edit_format: str
     weak_model_name: Optional[str] = None
@@ -236,6 +276,35 @@ MODEL_SETTINGS = [
 
 
 class Model:
+    """
+    Represents an LLM model with its configuration and capabilities.
+    
+    This class encapsulates all information about a specific LLM model including
+    its name, token limits, costs, supported features, and optimal settings for
+    use with aider. It handles model validation, environment checking, and
+    provides utilities for token counting and cost estimation.
+    
+    Attributes:
+        name (str): Model identifier.
+        edit_format (str): Optimal edit format for this model.
+        use_repo_map (bool): Whether to use repository mapping.
+        send_undo_reply (bool): Whether to send undo confirmations.
+        accepts_images (bool): Whether model supports vision/images.
+        weak_model_name (str): Name of associated weak/cheap model.
+        lazy (bool): Whether to use lazy prompt loading.
+        reminder_as_sys_msg (bool): Send reminders as system messages.
+        examples_as_sys_msg (bool): Send examples as system messages.
+        max_chat_history_tokens (int): Maximum tokens for chat history.
+        weak_model (Model): Instance of the weak model if configured.
+        info (dict): Model metadata from litellm.
+        missing_keys (list): API keys missing from environment.
+        keys_in_environment (bool): Whether required keys are present.
+        
+    Example:
+        >>> model = Model("gpt-4o")
+        >>> print(f"Max tokens: {model.info.get('max_input_tokens')}")
+        >>> print(f"Supports images: {model.accepts_images}")
+    """
     name = None
 
     edit_format = "whole"
@@ -406,6 +475,24 @@ class Model:
             return img.size
 
     def validate_environment(self):
+        """
+        Validate that required API keys and environment variables are present.
+        
+        Checks if the necessary API keys for this model are available in the
+        environment. Handles special cases for providers like Cohere, Gemini,
+        and Groq that may not be properly detected by litellm.
+        
+        Returns:
+            dict: Dictionary with keys:
+                - 'keys_in_environment' (bool): Whether all keys are present.
+                - 'missing_keys' (list): List of missing API key names.
+                
+        Example:
+            >>> model = Model("gpt-4o")
+            >>> result = model.validate_environment()
+            >>> if not result['keys_in_environment']:
+            ...     print(f"Missing: {result['missing_keys']}")
+        """
         # https://github.com/BerriAI/litellm/issues/3190
 
         model = self.name

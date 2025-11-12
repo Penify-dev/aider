@@ -1,3 +1,20 @@
+"""
+In-chat command handlers for aider.
+
+This module implements all the slash commands available during an aider chat session,
+including:
+- File management (/add, /drop, /ls)
+- Git operations (/commit, /diff, /undo)
+- Model switching (/model, /models)
+- Code execution (/run, /test, /lint)
+- Voice input (/voice)
+- Web scraping (/web)
+- Help and information (/help, /tokens)
+
+Each command is implemented as a method with the cmd_ prefix and can have an
+associated completions_ method for tab completion support.
+"""
+
 import os
 import re
 import subprocess
@@ -17,11 +34,39 @@ from .dump import dump  # noqa: F401
 
 
 class SwitchModel(Exception):
+    """
+    Exception raised to signal a model switch request.
+    
+    Used to break out of the current chat loop and reinitialize
+    the coder with a different LLM model.
+    
+    Attributes:
+        model: The new Model instance to switch to.
+    """
     def __init__(self, model):
         self.model = model
 
 
 class Commands:
+    """
+    Handler for all in-chat slash commands in aider.
+    
+    Provides methods for executing commands like /add, /commit, /run, etc.
+    Each command method (cmd_*) handles a specific user command, and optional
+    completions_* methods provide tab completion support.
+    
+    Attributes:
+        io: InputOutput instance for user interaction.
+        coder: Coder instance managing the chat session.
+        voice_language (str): Language code for voice input, or None for auto-detect.
+        voice: Voice input handler instance (lazy-loaded).
+        scraper: Web scraper instance (lazy-loaded).
+        
+    Example:
+        >>> commands = Commands(io, coder, voice_language="en")
+        >>> commands.cmd_add("/add main.py")
+        >>> commands.cmd_commit()
+    """
     voice = None
     scraper = None
 
@@ -35,7 +80,22 @@ class Commands:
         self.voice_language = voice_language
 
     def cmd_model(self, args):
-        "Switch to a new LLM"
+        """
+        Switch to a different LLM model.
+        
+        Changes the active language model for the chat session. Validates
+        the model and raises SwitchModel exception to trigger reinitialization.
+        
+        Args:
+            args (str): Model name to switch to (e.g., "gpt-4o", "claude-3-opus").
+            
+        Raises:
+            SwitchModel: Always raised to signal model switch to main loop.
+            
+        Example:
+            /model gpt-4o
+            /model claude-3-opus-20240229
+        """
 
         model_name = args.strip()
         model = models.Model(model_name)
@@ -59,7 +119,21 @@ class Commands:
             self.io.tool_output("Please provide a partial model name to search for.")
 
     def cmd_web(self, args):
-        "Use headless selenium to scrape a webpage and add the content to the chat"
+        """
+        Scrape a webpage and add its content to the chat context.
+        
+        Uses headless browser automation to fetch and extract text content
+        from a webpage, making it available for the LLM to reference.
+        
+        Args:
+            args (str): URL of the webpage to scrape.
+            
+        Returns:
+            str: Scraped content prefixed with URL, or None if scraping failed.
+            
+        Example:
+            /web https://example.com/documentation
+        """
         url = args.strip()
         if not url:
             self.io.tool_error("Please provide a URL to scrape.")
@@ -81,9 +155,27 @@ class Commands:
         return content
 
     def is_command(self, inp):
+        """
+        Check if input string is a command.
+        
+        Args:
+            inp (str): User input string.
+            
+        Returns:
+            bool: True if input starts with / or !, False otherwise.
+        """
         return inp[0] in "/!"
 
     def get_commands(self):
+        """
+        Get list of all available commands.
+        
+        Discovers all command methods (those starting with cmd_) and
+        returns them as slash commands.
+        
+        Returns:
+            list: List of command strings (e.g., ["/add", "/commit", "/help"]).
+        """
         commands = []
         for attr in dir(self):
             if attr.startswith("cmd_"):
@@ -92,6 +184,19 @@ class Commands:
         return commands
 
     def get_command_completions(self, cmd_name, partial):
+        """
+        Get tab completions for a specific command.
+        
+        Looks for a completions_{cmd_name} method and yields completions
+        for the partial input.
+        
+        Args:
+            cmd_name (str): Name of the command (without / prefix).
+            partial (str): Partial input to complete.
+            
+        Yields:
+            Completion: prompt_toolkit Completion objects for matching items.
+        """
         cmd_completions_method_name = f"completions_{cmd_name}"
         cmd_completions_method = getattr(self, cmd_completions_method_name, None)
         if cmd_completions_method:
