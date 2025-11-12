@@ -9,7 +9,7 @@ from typing import Optional
 from PIL import Image
 
 from aider.dump import dump  # noqa: F401
-from aider.litellm import litellm
+from aider.litellm import LITELLM_AVAILABLE, litellm
 
 DEFAULT_MODEL_NAME = "gpt-4o"
 
@@ -278,7 +278,9 @@ class Model:
         self.missing_keys = res.get("missing_keys")
         self.keys_in_environment = res.get("keys_in_environment")
 
-        if self.info.get("max_input_tokens", 0) < 32 * 1024:
+        # Set max_chat_history_tokens based on model's max_input_tokens
+        max_input_tokens = self.info.get("max_input_tokens", 0) if self.info else 0
+        if max_input_tokens < 32 * 1024:
             self.max_chat_history_tokens = 1024
         else:
             self.max_chat_history_tokens = 2 * 1024
@@ -409,21 +411,56 @@ class Model:
         # https://github.com/BerriAI/litellm/issues/3190
 
         model = self.name
-        res = litellm.validate_environment(model)
-        if res["keys_in_environment"]:
-            return res
-        if res["missing_keys"]:
-            return res
 
-        provider = self.info.get("litellm_provider", "").lower()
-        if provider == "cohere_chat":
-            return validate_variables(["COHERE_API_KEY"])
-        if provider == "gemini":
-            return validate_variables(["GEMINI_API_KEY"])
-        if provider == "groq":
-            return validate_variables(["GROQ_API_KEY"])
+        # If litellm is not available, use fallback validation
+        if not LITELLM_AVAILABLE:
+            # If we don't have model info, we can't validate properly
+            if not self.info:
+                return dict(keys_in_environment=False, missing_keys=[])
 
-        return res
+            provider = self.info.get("litellm_provider", "").lower()
+
+            # For Ollama, no API keys are needed
+            if provider == "ollama":
+                return dict(keys_in_environment=True, missing_keys=[])
+
+            # For other providers, check common environment variables
+            if provider == "openai":
+                return validate_variables(["OPENAI_API_KEY"])
+            if provider == "anthropic":
+                return validate_variables(["ANTHROPIC_API_KEY"])
+            if provider == "cohere_chat":
+                return validate_variables(["COHERE_API_KEY"])
+            if provider == "gemini":
+                return validate_variables(["GEMINI_API_KEY"])
+            if provider == "groq":
+                return validate_variables(["GROQ_API_KEY"])
+
+            # Unknown provider, assume no keys needed
+            return dict(keys_in_environment=False, missing_keys=[])
+
+        # Use litellm's validation if available
+        try:
+            res = litellm.validate_environment(model)
+            if res["keys_in_environment"]:
+                return res
+            if res["missing_keys"]:
+                return res
+        except (AttributeError, ImportError):
+            # Fallback if litellm.validate_environment is not available
+            pass
+
+        # Additional provider-specific checks
+        if self.info:
+            provider = self.info.get("litellm_provider", "").lower()
+            if provider == "cohere_chat":
+                return validate_variables(["COHERE_API_KEY"])
+            if provider == "gemini":
+                return validate_variables(["GEMINI_API_KEY"])
+            if provider == "groq":
+                return validate_variables(["GROQ_API_KEY"])
+
+        return dict(keys_in_environment=False, missing_keys=[])
 
 
 def validate_variables(vars):
@@ -478,6 +515,11 @@ def fuzzy_match_models(name):
     name = name.lower()
 
     chat_models = []
+
+    # If litellm is not available, return empty list
+    if not LITELLM_AVAILABLE or not hasattr(litellm, 'model_cost'):
+        return []
+
     for model, attrs in litellm.model_cost.items():
         model = model.lower()
         if attrs.get("mode") != "chat":
